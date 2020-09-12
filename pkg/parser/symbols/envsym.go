@@ -9,6 +9,7 @@ const Env SymbolType = "EnvSymbol"
 type EnvSymbol struct {
 	Environment string
 	Statements []Symbol
+	SquareArgs []Symbol
 }
 
 func (e EnvSymbol) Type() SymbolType {

@@ -6,7 +6,8 @@ import (
 )
 
 type Tokenizer struct {
-	scanner *scanner.Scanner
+	scanner          *scanner.Scanner
+	OriginalFilePath string
 
 	tokenStack []Token
 }
@@ -110,6 +111,14 @@ func (t *Tokenizer) Next() Token {
 		}
 	}
 
+	if rs == "$" {
+		t.scanner.Next()
+		return Token {
+			Type: Dollar,
+			Pos: initialPos,
+		}
+	}
+
 	if r == scanner.EOF {
 		t.scanner.Next()
 		return Token {
@@ -135,7 +144,7 @@ func isAlphaNum(r rune) bool {
 
 func isLatexChar(r rune) bool {
 	switch r {
-	case '{', '}', '\\', '%':
+	case '{', '}', '\\', '%', '[', ']', '$':
 		return true
 	}
 
@@ -151,6 +160,10 @@ func (t Tokenizer) text(pos scanner.Position) Token {
 	for ;; {
 		currentRune := t.scanner.Peek()
 		if !isValidTextChar(currentRune) {
+			break
+		}
+
+		if currentRune == -1 {
 			break
 		}
 		tokenContent = append(tokenContent, t.scanner.Next())
@@ -176,7 +189,7 @@ func (t Tokenizer) identifier(pos scanner.Position) Token {
 
 	for ;; {
 		currentRune = t.scanner.Peek()
-		if !isAlphaNum(currentRune) {
+		if !isValidIdentifierChar(currentRune) {
 			break
 		}
 
@@ -191,6 +204,10 @@ func (t Tokenizer) identifier(pos scanner.Position) Token {
 	}
 }
 
+func isValidIdentifierChar(r rune) bool {
+	return isAlphaNum(r) || r == '*'
+}
+
 func Open(path string) (*Tokenizer, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -200,5 +217,5 @@ func Open(path string) (*Tokenizer, error) {
 	var s scanner.Scanner
 	s.Init(file)
 
-	return &Tokenizer{scanner: &s}, nil
+	return &Tokenizer{scanner: &s, OriginalFilePath: path}, nil
 }

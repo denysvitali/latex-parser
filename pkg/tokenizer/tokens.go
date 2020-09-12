@@ -10,6 +10,7 @@ const (
 	CloseCurly TokenType = "CloseCurly"
 	OpenSquare TokenType = "OpenSquare"
 	CloseSquare TokenType = "CloseSquare"
+	Dollar TokenType = "Dollar"
 	EOF TokenType = "EOF"
 	NewLine TokenType = "NewLine"
 	Percent TokenType = "Percent"

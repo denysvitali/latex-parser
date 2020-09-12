@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/denysvitali/latex-parser/pkg/parser/symbols"
 	"github.com/denysvitali/latex-parser/pkg/tokenizer"
+	"path/filepath"
 	"strings"
 )
 
@@ -19,10 +20,10 @@ func New(tokenizer *tokenizer.Tokenizer) *Parser {
 }
 
 func (p *Parser) Parse() ([]symbols.Symbol, error){
-	return p.parse("")
+	return p.parse(tokenizer.Unknown, "")
 }
 
-func (p *Parser) parse(envName string) ([]symbols.Symbol, error) {
+func (p *Parser) parse(tokenType tokenizer.TokenType, envName string) ([]symbols.Symbol, error) {
 	var statements []symbols.Symbol
 
 	for ;; {
@@ -33,7 +34,6 @@ func (p *Parser) parse(envName string) ([]symbols.Symbol, error) {
 		}
 
 		if currentToken.Type == tokenizer.Identifier {
-
 			if currentToken.Name == "end" {
 				p.tokenizer.Next()
 				// Check if this envName is the environment we're going to end
@@ -52,6 +52,21 @@ func (p *Parser) parse(envName string) ([]symbols.Symbol, error) {
 				return statements, err
 			}
 			statements = append(statements, envMacro)
+			continue
+		}
+
+		if currentToken.Type == tokenizer.Dollar {
+
+			if tokenType == tokenizer.Dollar {
+				return statements, nil
+			}
+
+			// Inline Math Mode
+			symbol, err := p.inlineMath()
+			if err != nil {
+				return statements, err
+			}
+			statements = append(statements, symbol)
 			continue
 		}
 
@@ -76,6 +91,27 @@ func (p *Parser) parse(envName string) ([]symbols.Symbol, error) {
 			newLineSymbol := symbols.NewLineSymbol{}
 			statements = append(statements, newLineSymbol)
 			continue
+		}
+
+		if currentToken.Type == tokenizer.OpenCurly {
+			p.tokenizer.Next()
+			parsedStatements, err := p.parse(tokenizer.CloseCurly, "")
+			if err != nil {
+				return statements, err
+			}
+
+			statements = append(statements, symbols.CurlyEnvSymbol {
+				Statements: parsedStatements,
+			})
+			continue
+		}
+
+		if currentToken.Type == tokenizer.CloseCurly {
+			return statements, nil
+		}
+
+		if currentToken.Type == tokenizer.CloseSquare {
+			return statements, nil
 		}
 
 		panic(fmt.Sprintf("unimplemented token %s", currentToken.Type))
@@ -143,7 +179,17 @@ func (p *Parser) envMacro() (symbols.Symbol, error) {
 			return statement, fmt.Errorf("cannot parse begin curly argument: %v", err)
 		}
 
-		s, err := p.parse(envName)
+		var squareArgs []symbols.Symbol
+		if p.tokenizer.Peek().Type == tokenizer.OpenSquare {
+			// The envMacro has some optional args
+			var err error
+			squareArgs, err = p.squareArguments()
+			if err != nil {
+				return statement, err
+			}
+		}
+
+		s, err := p.parse(tokenizer.Identifier, envName)
 		if err != nil {
 			return statement, fmt.Errorf("unable to parse inside of \\begin{%s}: %v", envName, err)
 		}
@@ -151,12 +197,48 @@ func (p *Parser) envMacro() (symbols.Symbol, error) {
 		statement = symbols.EnvSymbol{
 			Environment: envName,
 			Statements: s,
+			SquareArgs: squareArgs,
 		}
 		return statement, nil
 	}
 
-	var curlyArguments [][]symbols.Symbol
+	if token.Name == "include" {
+		// Include files. I guess this should be part of the interpreter instead, but since I need a complete
+		// AST for my use case, I included it here 🤷
 
+		basePath := filepath.Dir(p.tokenizer.OriginalFilePath)
+		fileName, err := p.curlySingleArgument()
+		if err != nil {
+			return statement, fmt.Errorf("unable to find included file %s", fileName)
+		}
+
+		finalPath := filepath.Join(basePath, fileName + ".tex")
+
+		tkz2, err := tokenizer.Open(finalPath)
+		if err != nil {
+			return statement, fmt.Errorf("unable to initialize nested tokenizer: %v", err)
+		}
+
+		p2 := New(tkz2)
+		symb, err := p2.Parse()
+
+		return symbols.IncludeSymbol{
+			Path: fileName,
+			Statements: symb,
+		}, nil
+	}
+
+	var squareArgs []symbols.Symbol
+	if p.tokenizer.Peek().Type == tokenizer.OpenSquare {
+		// The envMacro has some optional args
+		var err error
+		squareArgs, err = p.squareArguments()
+		if err != nil {
+			return statement, err
+		}
+	}
+
+	var curlyArguments [][]symbols.Symbol
 	// Loop because we can have multiple (2?) arguments to a macro
 	// e.g: \dfrac{1}{x}
 	for i:=0; i<=1; i++ {
@@ -169,18 +251,6 @@ func (p *Parser) envMacro() (symbols.Symbol, error) {
 			}
 
 			curlyArguments = append(curlyArguments, cArg)
-		}
-	}
-
-
-	var squareArgs []symbols.Symbol
-
-	if p.tokenizer.Peek().Type == tokenizer.OpenSquare {
-		// The envMacro has some optional args
-		var err error
-		squareArgs, err = p.squareArguments()
-		if err != nil {
-			return statement, err
 		}
 	}
 
@@ -199,6 +269,9 @@ func (p *Parser) squareArguments() ([]symbols.Symbol, error) {
 	if p.tokenizer.Next().Type != tokenizer.OpenSquare {
 		return args, errors.New("expected [")
 	}
+
+	currentToken := p.tokenizer.Peek()
+	fmt.Printf("currentToken: %v\n", currentToken)
 
 	args, err = p.argBody(tokenizer.CloseSquare)
 	if err != nil {
@@ -231,40 +304,7 @@ func (p *Parser) curlyArguments() ([]symbols.Symbol, error) {
 }
 
 func(p *Parser) argBody(stopWith tokenizer.TokenType) ([]symbols.Symbol, error){
-	var args []symbols.Symbol
-	for ;; {
-		// Scan everything until } is found
-		if p.tokenizer.Peek().Type == stopWith {
-			break
-		}
-
-		if p.tokenizer.Peek().Type == tokenizer.Percent {
-			_ , err := p.comment()
-			if err != nil {
-				return args, err
-			}
-			continue
-		}
-
-		if p.tokenizer.Peek().Type == tokenizer.Identifier {
-			// TODO: Execute Macro
-			macro, err := p.envMacro()
-			if err != nil {
-				return args, err
-			}
-			args = append(args, macro)
-			continue
-		}
-
-		if p.tokenizer.Peek().Type == tokenizer.Text {
-			token := p.tokenizer.Next()
-			text := symbols.TextSymbol{Content: token.Value.(string)}
-			args = append(args, text)
-			continue
-		}
-	}
-
-	return args, nil
+	return p.parse(stopWith, "")
 }
 
 func (p *Parser) curlySingleArgument() (string, error) {
@@ -308,4 +348,19 @@ func (p *Parser) endEnvironment(name string) error {
 	}
 
 	return nil
+}
+
+func (p *Parser) inlineMath() (symbols.Symbol, error) {
+	var symbol symbols.Symbol
+	if p.tokenizer.Next().Type != tokenizer.Dollar {
+		return symbol, errors.New("unexpected token %s, $ expected")
+	}
+
+	// Body
+	statements, err := p.parse(tokenizer.Dollar, "")
+	if err != nil {
+		return symbol, nil
+	}
+
+	return symbols.InlineMathSymbol{Statements: statements}, nil
 }
