@@ -9,7 +9,7 @@ import (
 )
 
 func TestTokenizer1(t *testing.T){
-	tk, err := tokenizer.Open("../../resources/test/tokenizer/1.tex")
+	tk, err := tokenizer.Open("../../resources/test/1.tex")
 	assert.Nil(t, err)
 	assert.NotNil(t, tk)
 
@@ -54,6 +54,28 @@ func TestTokenizer1(t *testing.T){
 			Column:   23,
 		},
 	}, tk.Next())
+
+	assert.Equal(t, tokenizer.Token{
+		Type: tokenizer.Text,
+		Pos: scanner.Position{
+			Filename: "",
+			Offset:   23,
+			Line:     1,
+			Column:   24,
+		},
+		Value: " ",
+	}, tk.Peek())
+
+	assert.Equal(t, tokenizer.Token{
+		Type: tokenizer.Text,
+		Pos: scanner.Position{
+			Filename: "",
+			Offset:   23,
+			Line:     1,
+			Column:   24,
+		},
+		Value: " ",
+	}, tk.Peek())
 
 	assert.Equal(t, tokenizer.Token{
 		Type: tokenizer.Text,
@@ -163,7 +185,7 @@ func TestTokenizer1(t *testing.T){
 }
 
 func TestTokenizer2(t *testing.T){
-	tk, err := tokenizer.Open("../../resources/test/tokenizer/1.tex")
+	tk, err := tokenizer.Open("../../resources/test/1.tex")
 	assert.Nil(t, err)
 
 	for ;; {
@@ -172,6 +194,14 @@ func TestTokenizer2(t *testing.T){
 			return
 		}
 
-		fmt.Printf("%+v\n", next)
+		if next.Value != nil {
+			fmt.Printf("%s: %s (%s)\n", next.Type, next.Name, next.Value)
+		} else {
+			if next.Name != "" {
+				fmt.Printf("%s: %s\n", next.Type, next.Name)
+			} else {
+				fmt.Printf("%s\n", next.Type)
+			}
+		}
 	}
 }

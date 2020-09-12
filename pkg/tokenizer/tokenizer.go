@@ -7,6 +7,8 @@ import (
 
 type Tokenizer struct {
 	scanner *scanner.Scanner
+
+	tokenStack []Token
 }
 
 func getFirstRune(s string) rune {
@@ -14,7 +16,22 @@ func getFirstRune(s string) rune {
 	return runes[0]
 }
 
-func (t Tokenizer) Next() Token {
+func (t *Tokenizer) Peek() Token {
+	if len(t.tokenStack) == 0 {
+		t.tokenStack = append(t.tokenStack, t.Next())
+		return t.tokenStack[0]
+	}
+
+	return t.tokenStack[0]
+}
+
+func (t *Tokenizer) Next() Token {
+	if len(t.tokenStack) != 0 {
+		lastToken := t.tokenStack[0]
+		t.tokenStack = t.tokenStack[1:]
+		return lastToken
+	}
+
 	initialPos := t.scanner.Pos()
 	r := t.scanner.Peek()
 	rs := string(r)
@@ -65,6 +82,22 @@ func (t Tokenizer) Next() Token {
 		t.scanner.Next()
 		return Token {
 			Type: CloseCurly,
+			Pos: initialPos,
+		}
+	}
+
+	if rs == "[" {
+		t.scanner.Next()
+		return Token {
+			Type: OpenSquare,
+			Pos: initialPos,
+		}
+	}
+
+	if rs == "]" {
+		t.scanner.Next()
+		return Token {
+			Type: CloseSquare,
 			Pos: initialPos,
 		}
 	}
@@ -156,13 +189,6 @@ func (t Tokenizer) identifier(pos scanner.Position) Token {
 		Type: Identifier,
 		Pos: pos,
 	}
-}
-
-type Token struct {
-	Type  TokenType
-	Name  string
-	Value interface{}
-	Pos   scanner.Position
 }
 
 func Open(path string) (*Tokenizer, error) {
