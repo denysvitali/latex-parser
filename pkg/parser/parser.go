@@ -18,7 +18,11 @@ func New(tokenizer *tokenizer.Tokenizer) *Parser {
 	}
 }
 
-func (p *Parser) Parse() ([]symbols.Symbol, error) {
+func (p *Parser) Parse() ([]symbols.Symbol, error){
+	return p.parse("")
+}
+
+func (p *Parser) parse(envName string) ([]symbols.Symbol, error) {
 	var statements []symbols.Symbol
 
 	for ;; {
@@ -29,6 +33,20 @@ func (p *Parser) Parse() ([]symbols.Symbol, error) {
 		}
 
 		if currentToken.Type == tokenizer.Identifier {
+
+			if currentToken.Name == "end" {
+				p.tokenizer.Next()
+				// Check if this envName is the environment we're going to end
+				env, err := p.curlySingleArgument()
+				if err != nil {
+					return statements, fmt.Errorf("cannot parse begin curly argument: %v", err)
+				}
+
+				if env == envName {
+					return statements, nil
+				}
+			}
+
 			envMacro, err := p.envMacro()
 			if err != nil {
 				return statements, err
@@ -50,6 +68,13 @@ func (p *Parser) Parse() ([]symbols.Symbol, error) {
 			p.tokenizer.Next()
 			textSymbol := symbols.TextSymbol{Content: currentToken.Value.(string)}
 			statements = append(statements, textSymbol)
+			continue
+		}
+
+		if currentToken.Type == tokenizer.NewLine {
+			p.tokenizer.Next()
+			newLineSymbol := symbols.NewLineSymbol{}
+			statements = append(statements, newLineSymbol)
 			continue
 		}
 
@@ -117,30 +142,38 @@ func (p *Parser) envMacro() (symbols.Symbol, error) {
 		if err != nil {
 			return statement, fmt.Errorf("cannot parse begin curly argument: %v", err)
 		}
+
+		s, err := p.parse(envName)
+		if err != nil {
+			return statement, fmt.Errorf("unable to parse inside of \\begin{%s}: %v", envName, err)
+		}
+
 		statement = symbols.EnvSymbol{
 			Environment: envName,
+			Statements: s,
 		}
-
-		err = p.endEnvironment(envName)
-		if err != nil {
-			return statement, err
-		}
-
 		return statement, nil
 	}
 
-	var curlyArguments []string
+	var curlyArguments [][]symbols.Symbol
 
-	if p.tokenizer.Peek().Type == tokenizer.OpenCurly {
-		// The envMacro has some arguments, let's parse them
-		var err error
-		curlyArguments, err = p.curlyArguments()
-		if err != nil {
-			return statement, err
+	// Loop because we can have multiple (2?) arguments to a macro
+	// e.g: \dfrac{1}{x}
+	for i:=0; i<=1; i++ {
+		if p.tokenizer.Peek().Type == tokenizer.OpenCurly {
+			// The envMacro has some arguments, let's parse them
+			var err error
+			cArg, err := p.curlyArguments()
+			if err != nil {
+				return statement, err
+			}
+
+			curlyArguments = append(curlyArguments, cArg)
 		}
 	}
 
-	var squareArgs []string
+
+	var squareArgs []symbols.Symbol
 
 	if p.tokenizer.Peek().Type == tokenizer.OpenSquare {
 		// The envMacro has some optional args
@@ -160,63 +193,78 @@ func (p *Parser) envMacro() (symbols.Symbol, error) {
 	return macro, nil
 }
 
-func (p *Parser) squareArguments() ([]string, error) {
-	var squareArgs []string
+func (p *Parser) squareArguments() ([]symbols.Symbol, error) {
+	var args []symbols.Symbol
+	var err error
 	if p.tokenizer.Next().Type != tokenizer.OpenSquare {
-		return squareArgs, errors.New("expected [")
+		return args, errors.New("expected [")
 	}
 
-	textToken := p.tokenizer.Next()
-	if textToken.Type != tokenizer.Text {
-		return squareArgs, errors.New("expected text")
+	args, err = p.argBody(tokenizer.CloseSquare)
+	if err != nil {
+		return args, err
 	}
-	squareArgs = strings.Split(textToken.Value.(string), ",")
 
 	if p.tokenizer.Next().Type != tokenizer.CloseSquare {
-		return squareArgs, errors.New("expected ]")
+		return args, errors.New("expected ]")
 	}
 
-	return squareArgs, nil
+	return args, nil
 }
 
 
 func (p *Parser) curlyArguments() ([]symbols.Symbol, error) {
-	var curlyArgs []symbols.Symbol
 	if p.tokenizer.Next().Type != tokenizer.OpenCurly {
-		return curlyArgs, errors.New("expected {")
+		return []symbols.Symbol{}, errors.New("expected {")
 	}
 
+	args, err := p.argBody(tokenizer.CloseCurly)
+	if err != nil {
+		return args, err
+	}
+
+	if p.tokenizer.Next().Type != tokenizer.CloseCurly {
+		return args, errors.New("expected }")
+	}
+
+	return args, nil
+}
+
+func(p *Parser) argBody(stopWith tokenizer.TokenType) ([]symbols.Symbol, error){
+	var args []symbols.Symbol
 	for ;; {
 		// Scan everything until } is found
-		if p.tokenizer.Peek().Type == tokenizer.CloseCurly {
-			p.tokenizer.Next()
-			return curlyArgs, nil
+		if p.tokenizer.Peek().Type == stopWith {
+			break
 		}
 
 		if p.tokenizer.Peek().Type == tokenizer.Percent {
 			_ , err := p.comment()
 			if err != nil {
-				return curlyArgs, err
+				return args, err
 			}
 			continue
 		}
 
 		if p.tokenizer.Peek().Type == tokenizer.Identifier {
 			// TODO: Execute Macro
-			macro, _ := p.envMacro()
+			macro, err := p.envMacro()
+			if err != nil {
+				return args, err
+			}
+			args = append(args, macro)
+			continue
+		}
+
+		if p.tokenizer.Peek().Type == tokenizer.Text {
+			token := p.tokenizer.Next()
+			text := symbols.TextSymbol{Content: token.Value.(string)}
+			args = append(args, text)
+			continue
 		}
 	}
 
-	if textToken.Type != tokenizer.Text {
-		return curlyArgs, errors.New("expected text")
-	}
-	curlyArgs = strings.Split(textToken.Value.(string), ",")
-
-	if p.tokenizer.Next().Type != tokenizer.CloseCurly {
-		return curlyArgs, errors.New("expected }")
-	}
-
-	return curlyArgs, nil
+	return args, nil
 }
 
 func (p *Parser) curlySingleArgument() (string, error) {
@@ -229,6 +277,8 @@ func (p *Parser) curlySingleArgument() (string, error) {
 	if textToken.Type != tokenizer.Text {
 		return curlyArg, errors.New("expected text")
 	}
+
+	curlyArg = textToken.Value.(string)
 
 	if p.tokenizer.Next().Type != tokenizer.CloseCurly {
 		return curlyArg, errors.New("expected }")

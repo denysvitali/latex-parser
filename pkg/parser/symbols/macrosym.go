@@ -8,8 +8,8 @@ const Macro SymbolType = "Macro"
 
 type MacroSymbol struct {
 	MacroName string
-	CurlyArgs []string
-	SquareArgs []string
+	CurlyArgs [][]Symbol
+	SquareArgs []Symbol
 }
 
 func (m MacroSymbol) Type() SymbolType {
