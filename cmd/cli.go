@@ -49,6 +49,22 @@ func printText(symb []symbols.Symbol) {
 			printText(env.Statements)
 		case symbols.NewLine:
 			fmt.Print("\n")
+		case symbols.Macro:
+			macro := v.(symbols.MacroSymbol)
+			switch macro.MacroName {
+			case "textit", "textbf":
+				printText(macro.CurlyArgs[0])
+			}
+		case symbols.Include:
+			include := v.(symbols.IncludeSymbol)
+			printText(include.Statements)
+		case symbols.CurlyEnv:
+			curlyEnv := v.(symbols.CurlyEnvSymbol)
+			printText(curlyEnv.Statements)
+		case symbols.InlineMath:
+			// Discard
+		default:
+			panic(fmt.Errorf("unhandled %v", v.Type()))
 		}
 	}
 }

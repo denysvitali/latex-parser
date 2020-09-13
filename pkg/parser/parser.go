@@ -145,89 +145,10 @@ func (p *Parser) comment() (symbols.Symbol, error){
 	return nil, nil
 }
 
-func (p *Parser) envMacro() (symbols.Symbol, error) {
-	var statement symbols.Symbol
-	/*
-		An envMacro is usually a macro that can get executed and defined by the user.
-		Identifiers are basically functions that return values and can therefore have arguments.
-		These arguments are passed via curly brackets { } and square brackets [ ], for example:
-		\newcommand{name}[num][default]{definition}
-
-		Additionally, the special envMacro \begin{xxx} and \end{xxx} will define an "environment".
-		These environments are usually used to run certain macros before and after the content
-		defined between those two entries.
-
-		Environments can additionally be nested. A simple example is:
-			\begin{figure}[h!]
-				\begin{center}
-					\includegraphics{image.png}
-					\caption{An image}
-				\end{center}
-			\end{figure}
-	*/
-
+func (p *Parser) macro() (symbols.Symbol, error) {
 	token := p.tokenizer.Next()
 
-	if token.Type != tokenizer.Identifier {
-		return statement, errors.New("token is not an envMacro")
-	}
-
-	if token.Name == "begin" {
-		// Start of an environment (can contain multiple statements)
-		envName, err := p.curlySingleArgument()
-		if err != nil {
-			return statement, fmt.Errorf("cannot parse begin curly argument: %v", err)
-		}
-
-		var squareArgs []symbols.Symbol
-		if p.tokenizer.Peek().Type == tokenizer.OpenSquare {
-			// The envMacro has some optional args
-			var err error
-			squareArgs, err = p.squareArguments()
-			if err != nil {
-				return statement, err
-			}
-		}
-
-		s, err := p.parse(tokenizer.Identifier, envName)
-		if err != nil {
-			return statement, fmt.Errorf("unable to parse inside of \\begin{%s}: %v", envName, err)
-		}
-
-		statement = symbols.EnvSymbol{
-			Environment: envName,
-			Statements: s,
-			SquareArgs: squareArgs,
-		}
-		return statement, nil
-	}
-
-	if token.Name == "include" {
-		// Include files. I guess this should be part of the interpreter instead, but since I need a complete
-		// AST for my use case, I included it here 🤷
-
-		basePath := filepath.Dir(p.tokenizer.OriginalFilePath)
-		fileName, err := p.curlySingleArgument()
-		if err != nil {
-			return statement, fmt.Errorf("unable to find included file %s", fileName)
-		}
-
-		finalPath := filepath.Join(basePath, fileName + ".tex")
-
-		tkz2, err := tokenizer.Open(finalPath)
-		if err != nil {
-			return statement, fmt.Errorf("unable to initialize nested tokenizer: %v", err)
-		}
-
-		p2 := New(tkz2)
-		symb, err := p2.Parse()
-
-		return symbols.IncludeSymbol{
-			Path: fileName,
-			Statements: symb,
-		}, nil
-	}
-
+	var statement symbols.Symbol
 	var squareArgs []symbols.Symbol
 	if p.tokenizer.Peek().Type == tokenizer.OpenSquare {
 		// The envMacro has some optional args
@@ -263,15 +184,113 @@ func (p *Parser) envMacro() (symbols.Symbol, error) {
 	return macro, nil
 }
 
+func (p *Parser) envMacro() (symbols.Symbol, error) {
+	var statement symbols.Symbol
+	/*
+		An envMacro is usually a macro that can get executed and defined by the user.
+		Identifiers are basically functions that return values and can therefore have arguments.
+		These arguments are passed via curly brackets { } and square brackets [ ], for example:
+		\newcommand{name}[num][default]{definition}
+
+		Additionally, the special envMacro \begin{xxx} and \end{xxx} will define an "environment".
+		These environments are usually used to run certain macros before and after the content
+		defined between those two entries.
+
+		Environments can additionally be nested. A simple example is:
+			\begin{figure}[h!]
+				\begin{center}
+					\includegraphics{image.png}
+					\caption{An image}
+				\end{center}
+			\end{figure}
+	*/
+
+	token := p.tokenizer.Peek()
+
+	if token.Type != tokenizer.Identifier {
+		return statement, errors.New("token is not an envMacro")
+	}
+
+	if token.Name == "begin" {
+		// Start of an environment (can contain multiple statements)
+		p.tokenizer.Next()
+		envName, err := p.curlySingleArgument()
+		if err != nil {
+			return statement, fmt.Errorf("cannot parse begin curly argument: %v", err)
+		}
+
+		var squareArgs []symbols.Symbol
+		if p.tokenizer.Peek().Type == tokenizer.OpenSquare {
+			// The envMacro has some optional args
+			var err error
+			squareArgs, err = p.squareArguments()
+			if err != nil {
+				return statement, err
+			}
+		}
+
+		var s []symbols.Symbol
+
+		switch envName{
+		case "equation", "align", "equation*", "align*":
+			var equationSymbol symbols.Symbol
+			equationSymbol, err = p.equationEnv(envName)
+			s = []symbols.Symbol{equationSymbol}
+		default:
+			s, err = p.parse(tokenizer.Identifier, envName)
+		}
+
+
+		if err != nil {
+			return statement, fmt.Errorf("unable to parse inside of \\begin{%s}: %v", envName, err)
+		}
+
+		statement = symbols.EnvSymbol{
+			Environment: envName,
+			Statements: s,
+			SquareArgs: squareArgs,
+		}
+		return statement, nil
+	}
+	if token.Name == "include" || token.Name == "input"{
+		// Include files. I guess this should be part of the interpreter instead, but since I need a complete
+		// AST for my use case, I included it here 🤷
+		p.tokenizer.Next()
+
+		basePath := filepath.Dir(p.tokenizer.OriginalFilePath)
+		fileName, err := p.curlySingleArgument()
+		if err != nil {
+			return statement, fmt.Errorf("unable to find included file %s", fileName)
+		}
+
+		if token.Name == "include" {
+			fileName = fileName + ".tex"
+		}
+		finalPath := filepath.Join(basePath, fileName)
+
+		tkz2, err := tokenizer.Open(finalPath)
+		if err != nil {
+			return statement, fmt.Errorf("unable to initialize nested tokenizer: %v", err)
+		}
+
+		p2 := New(tkz2)
+		symb, err := p2.Parse()
+
+		return symbols.IncludeSymbol{
+			Path: fileName,
+			Statements: symb,
+		}, nil
+	}
+
+	return p.macro()
+}
+
 func (p *Parser) squareArguments() ([]symbols.Symbol, error) {
 	var args []symbols.Symbol
 	var err error
 	if p.tokenizer.Next().Type != tokenizer.OpenSquare {
 		return args, errors.New("expected [")
 	}
-
-	currentToken := p.tokenizer.Peek()
-	fmt.Printf("currentToken: %v\n", currentToken)
 
 	args, err = p.argBody(tokenizer.CloseSquare)
 	if err != nil {
@@ -350,16 +369,151 @@ func (p *Parser) endEnvironment(name string) error {
 	return nil
 }
 
+func (p *Parser) equationEnv(envName string) (symbols.Symbol, error) {
+	var symbol symbols.Symbol
+	var statements []symbols.Symbol
+
+	peek := p.tokenizer.Peek()
+	if peek.Type != tokenizer.Identifier {
+		return symbol, fmt.Errorf("invalid token %v found, Identifier expected", peek.Type)
+	}
+
+	// Body
+	shouldStop := false
+	for ;; {
+		peek := p.tokenizer.Peek()
+
+		switch peek.Type {
+		case tokenizer.Dollar:
+			p.tokenizer.Next()
+			shouldStop = true
+
+		case tokenizer.Identifier:
+			if peek.Name == "end" {
+				// Handle end of this env
+				p.tokenizer.Next()
+				t := p.tokenizer.Next()
+				if t.Type != tokenizer.OpenCurly {
+					return symbol, fmt.Errorf("expected token {, fourd %v at %v", t.Type, t.Pos)
+				}
+				t = p.tokenizer.Next()
+				if t.Type != tokenizer.Text {
+					return symbol, fmt.Errorf("expected text, fourd %v at %v", t.Type, t.Pos)
+				}
+				currentEnv := t.Value.(string)
+				if currentEnv != envName {
+					return symbol, fmt.Errorf("wrong environment being ended: expected %v but fourd %v at %v",
+						envName, currentEnv, t.Pos)
+				}
+				t = p.tokenizer.Next()
+				if t.Type != tokenizer.CloseCurly {
+					return symbol, fmt.Errorf("expected token }, fourd %v at %v", t.Type, t.Pos)
+				}
+
+
+			}
+			statement, err := p.macro()
+			if err != nil {
+				return symbol, err
+			}
+
+			statements = append(statements, statement)
+			continue
+		case tokenizer.Text:
+			token := p.tokenizer.Next()
+			txtSymb := symbols.TextSymbol{
+				Content: token.Value.(string),
+			}
+			statements = append(statements, txtSymb)
+			continue
+		case tokenizer.OpenSquare:
+			p.tokenizer.Next()
+			txtSymb := symbols.TextSymbol{
+				Content: "[",
+			}
+			statements = append(statements, txtSymb)
+			continue
+		case tokenizer.CloseSquare:
+			p.tokenizer.Next()
+			txtSymb := symbols.TextSymbol{
+				Content: "]",
+			}
+			statements = append(statements, txtSymb)
+			continue
+		default:
+			panic(fmt.Sprintf("%v in InlineMath is unimplemented", peek))
+		}
+
+		if shouldStop {
+			break
+		}
+	}
+
+	return symbols.InlineMathSymbol{Statements: statements}, nil
+}
+
+/*
+	Inline Math
+
+	Anything delimited by $...$ is considered inline math. It behaves like a \begin{env}...\end{env}
+	but its contents are not parsed by a general math parser. The content of the Inline Math mode
+	is different from the classical LaTeX environment. This environment is used to write equations, therefore
+	the result of this mode in our parser would be an EquationSymbol.
+ */
 func (p *Parser) inlineMath() (symbols.Symbol, error) {
 	var symbol symbols.Symbol
+	var statements []symbols.Symbol
+
 	if p.tokenizer.Next().Type != tokenizer.Dollar {
 		return symbol, errors.New("unexpected token %s, $ expected")
 	}
 
 	// Body
-	statements, err := p.parse(tokenizer.Dollar, "")
-	if err != nil {
-		return symbol, nil
+	shouldStop := false
+	for ;; {
+		peek := p.tokenizer.Peek()
+
+		switch peek.Type {
+		case tokenizer.Dollar:
+			p.tokenizer.Next()
+			shouldStop = true
+
+		case tokenizer.Identifier:
+			statement, err := p.macro()
+			if err != nil {
+				return symbol, err
+			}
+
+			statements = append(statements, statement)
+			continue
+		case tokenizer.Text:
+			token := p.tokenizer.Next()
+			txtSymb := symbols.TextSymbol{
+				Content: token.Value.(string),
+			}
+			statements = append(statements, txtSymb)
+			continue
+		case tokenizer.OpenSquare:
+			p.tokenizer.Next()
+			txtSymb := symbols.TextSymbol{
+				Content: "[",
+			}
+			statements = append(statements, txtSymb)
+			continue
+		case tokenizer.CloseSquare:
+			p.tokenizer.Next()
+			txtSymb := symbols.TextSymbol{
+				Content: "]",
+			}
+			statements = append(statements, txtSymb)
+			continue
+		default:
+			panic(fmt.Sprintf("%v in InlineMath is unimplemented", peek))
+		}
+
+		if shouldStop {
+			break
+		}
 	}
 
 	return symbols.InlineMathSymbol{Statements: statements}, nil

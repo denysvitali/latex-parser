@@ -8,7 +8,7 @@ package symbols
 	}
 */
 
-const CurlyEnv SymbolType = "EnvSymbol"
+const CurlyEnv SymbolType = "CurlyEnv"
 
 type CurlyEnvSymbol struct {
 	Statements []Symbol
