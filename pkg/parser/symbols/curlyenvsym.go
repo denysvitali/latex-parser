@@ -1,5 +1,7 @@
 package symbols
 
+import "text/scanner"
+
 /*
 	A symbol that represents a Curly Bracket Environment
 	E.g:
@@ -12,13 +14,18 @@ const CurlyEnv SymbolType = "CurlyEnv"
 
 type CurlyEnvSymbol struct {
 	Statements []Symbol
+	Position scanner.Position
 }
 
-func (e CurlyEnvSymbol) Type() SymbolType {
+func (c CurlyEnvSymbol) Pos() scanner.Position {
+	return c.Position
+}
+
+func (c CurlyEnvSymbol) Type() SymbolType {
 	return CurlyEnv
 }
 
-func (e CurlyEnvSymbol) Name() string {
+func (c CurlyEnvSymbol) Name() string {
 	return "Curly Environment"
 }
 

@@ -1,11 +1,15 @@
 package symbols
 
+import "text/scanner"
+
 const NewLine SymbolType = "NewLine"
 
 type NewLineSymbol struct {
-	NewLineName string
-	CurlyArgs []Symbol
-	SquareArgs []Symbol
+	Position scanner.Position
+}
+
+func (m NewLineSymbol) Pos() scanner.Position {
+	return m.Position
 }
 
 func (m NewLineSymbol) Type() SymbolType {
@@ -13,7 +17,7 @@ func (m NewLineSymbol) Type() SymbolType {
 }
 
 func (m NewLineSymbol) Name() string {
-	return m.NewLineName
+	return "New Line"
 }
 
 var _ Symbol = NewLineSymbol{}

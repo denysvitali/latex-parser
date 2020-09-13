@@ -84,6 +84,8 @@ func printText(symb []symbols.Symbol) {
 		case symbols.InlineMath:
 			// Discard
 			fmt.Printf("Inline Math: %v", v)
+		case symbols.EndEnv, symbols.MacroText:
+			// Discard
 		default:
 			panic(fmt.Errorf("unhandled %v", v.Type()))
 		}

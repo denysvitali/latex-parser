@@ -35,9 +35,18 @@ func (t *Tokenizer) Next() Token {
 
 	initialPos := t.scanner.Pos()
 	r := t.scanner.Peek()
-	rs := string(r)
 
-	if rs == "\\" {
+	for ;; {
+		if r == ' ' {
+			t.scanner.Next()
+			initialPos = t.scanner.Pos()
+			r = t.scanner.Peek()
+			continue
+		}
+		break
+	}
+
+	if r == '\\' {
 		t.scanner.Next()
 		peekStr := string(t.scanner.Peek())
 
@@ -71,7 +80,7 @@ func (t *Tokenizer) Next() Token {
 		return t.identifier(initialPos)
 	}
 
-	if rs == "{" {
+	if r == '{' {
 		t.scanner.Next()
 		return Token{
 			Type: OpenCurly,
@@ -79,7 +88,7 @@ func (t *Tokenizer) Next() Token {
 		}
 	}
 
-	if rs == "}" {
+	if r == '}' {
 		t.scanner.Next()
 		return Token {
 			Type: CloseCurly,
@@ -87,7 +96,7 @@ func (t *Tokenizer) Next() Token {
 		}
 	}
 
-	if rs == "[" {
+	if r == '[' {
 		t.scanner.Next()
 		return Token {
 			Type: OpenSquare,
@@ -95,7 +104,7 @@ func (t *Tokenizer) Next() Token {
 		}
 	}
 
-	if rs == "]" {
+	if r == ']' {
 		t.scanner.Next()
 		return Token {
 			Type: CloseSquare,
@@ -103,7 +112,7 @@ func (t *Tokenizer) Next() Token {
 		}
 	}
 
-	if rs == "%" {
+	if r == '%' {
 		t.scanner.Next()
 		return Token {
 			Type: Percent,
@@ -111,7 +120,7 @@ func (t *Tokenizer) Next() Token {
 		}
 	}
 
-	if rs == "$" {
+	if r == '$' {
 		t.scanner.Next()
 		return Token {
 			Type: Dollar,

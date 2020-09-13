@@ -35,18 +35,66 @@ func (p *Parser) parse(tokenType tokenizer.TokenType, envName string) ([]symbols
 
 		if currentToken.Type == tokenizer.Identifier {
 			if currentToken.Name == "end" {
-				p.tokenizer.Next()
+				token := p.tokenizer.Next()
 				// Check if this envName is the environment we're going to end
 				env, err := p.curlySingleArgument()
 				if err != nil {
 					return statements, fmt.Errorf("cannot parse begin curly argument: %v", err)
 				}
-
+				symbol := symbols.EndEnvSymbol{
+					Environment: env,
+					Position: token.Pos,
+				}
+				statements = append(statements, symbol)
 				if env == envName {
 					return statements, nil
 				}
+				continue
 			}
 
+			if currentToken.Name == "newenvironment" {
+				firstToken := p.tokenizer.Next()
+
+				// Let's read first the environment name
+				env, err := p.curlySingleArgument()
+				if err != nil {
+					return statements, fmt.Errorf("cannot parse begin curly argument: %v", err)
+				}
+
+				// Optional square arg:
+				squareArgs, err := p.squareArguments()
+				if err == nil {
+
+				}
+
+				_, _ = p.comment()
+				p.skiptext()
+
+				// We will interpret this as "MacroText"
+				macroBegin, err := p.macroText(tokenizer.OpenCurly, tokenizer.CloseCurly)
+				if err != nil {
+					return statements, err
+				}
+				_, _ = p.comment()
+				p.skiptext()
+
+				macroEnd, err := p.macroText(tokenizer.OpenCurly, tokenizer.CloseCurly)
+				if err != nil {
+					return statements, err
+				}
+
+				newEnvironment := symbols.NewEnvironmentSymbol{
+					Environment: env,
+					Statements:  []symbols.Symbol{macroBegin, macroEnd},
+					SquareArgs: squareArgs,
+					Position:    firstToken.Pos,
+				}
+
+				statements = append(statements, newEnvironment)
+				continue
+			}
+
+			_,_ = p.comment()
 			envMacro, err := p.envMacro()
 			if err != nil {
 				return statements, err
@@ -131,10 +179,10 @@ func (p *Parser) parse(tokenType tokenizer.TokenType, envName string) ([]symbols
 
 func (p *Parser) comment() (symbols.Symbol, error){
 	var symbol symbols.Symbol
-	if p.tokenizer.Next().Type != tokenizer.Percent {
+	if p.tokenizer.Peek().Type != tokenizer.Percent {
 		return symbol, errors.New("comment doesn't start with a %")
 	}
-
+	p.tokenizer.Next()
 	// Ignore everything until newline
 
 	for ;; {
@@ -159,19 +207,21 @@ func (p *Parser) macro() (symbols.Symbol, error) {
 
 	var statement symbols.Symbol
 	var squareArgs []symbols.Symbol
-	if p.tokenizer.Peek().Type == tokenizer.OpenSquare {
-		// The envMacro has some optional args
-		var err error
-		squareArgs, err = p.squareArguments()
-		if err != nil {
-			return statement, err
-		}
-	}
 
-	var curlyArguments [][]symbols.Symbol
 	// Loop because we can have multiple (2?) arguments to a macro
 	// e.g: \dfrac{1}{x}
-	for i:=0; i<=1; i++ {
+	var curlyArguments [][]symbols.Symbol
+	for i:=0; i<5; i++ {
+		if p.tokenizer.Peek().Type == tokenizer.OpenSquare {
+			// The envMacro has some optional args
+			var err error
+			squareArgs, err = p.squareArguments()
+			if err != nil {
+				return statement, err
+			}
+			continue
+		}
+
 		if p.tokenizer.Peek().Type == tokenizer.OpenCurly {
 			// The envMacro has some arguments, let's parse them
 			var err error
@@ -181,6 +231,7 @@ func (p *Parser) macro() (symbols.Symbol, error) {
 			}
 
 			curlyArguments = append(curlyArguments, cArg)
+			continue
 		}
 	}
 
@@ -222,7 +273,7 @@ func (p *Parser) envMacro() (symbols.Symbol, error) {
 
 	if token.Name == "begin" {
 		// Start of an environment (can contain multiple statements)
-		p.tokenizer.Next()
+		token = p.tokenizer.Next()
 		envName, err := p.curlySingleArgument()
 		if err != nil {
 			return statement, fmt.Errorf("cannot parse begin curly argument: %v", err)
@@ -258,13 +309,14 @@ func (p *Parser) envMacro() (symbols.Symbol, error) {
 			Environment: envName,
 			Statements: s,
 			SquareArgs: squareArgs,
+			Position: token.Pos,
 		}
 		return statement, nil
 	}
 	if token.Name == "include" || token.Name == "input"{
 		// Include files. I guess this should be part of the interpreter instead, but since I need a complete
 		// AST for my use case, I included it here 🤷
-		p.tokenizer.Next()
+		token = p.tokenizer.Next()
 
 		basePath := filepath.Dir(p.tokenizer.OriginalFilePath)
 		fileName, err := p.curlySingleArgument()
@@ -288,6 +340,7 @@ func (p *Parser) envMacro() (symbols.Symbol, error) {
 		return symbols.IncludeSymbol{
 			Path: fileName,
 			Statements: symb,
+			Position: token.Pos,
 		}, nil
 	}
 
@@ -400,7 +453,7 @@ func (p *Parser) equationEnv(envName string) (symbols.Symbol, error) {
 		case tokenizer.Identifier:
 			if peek.Name == "end" {
 				// Handle end of this env
-				p.tokenizer.Next()
+				token := p.tokenizer.Next()
 				t := p.tokenizer.Next()
 				if t.Type != tokenizer.OpenCurly {
 					return symbol, fmt.Errorf("expected token {, fourd %v at %v", t.Type, t.Pos)
@@ -419,6 +472,11 @@ func (p *Parser) equationEnv(envName string) (symbols.Symbol, error) {
 					return symbol, fmt.Errorf("expected token }, fourd %v at %v", t.Type, t.Pos)
 				}
 
+				endEnv := symbols.EndEnvSymbol{
+					Environment: currentEnv,
+					Position: token.Pos,
+				}
+				statements = append(statements, endEnv)
 
 			}
 			statement, err := p.macro()
@@ -432,20 +490,23 @@ func (p *Parser) equationEnv(envName string) (symbols.Symbol, error) {
 			token := p.tokenizer.Next()
 			txtSymb := symbols.TextSymbol{
 				Content: token.Value.(string),
+				Position: token.Pos,
 			}
 			statements = append(statements, txtSymb)
 			continue
 		case tokenizer.OpenSquare:
-			p.tokenizer.Next()
+			token := p.tokenizer.Next()
 			txtSymb := symbols.TextSymbol{
 				Content: "[",
+				Position: token.Pos,
 			}
 			statements = append(statements, txtSymb)
 			continue
 		case tokenizer.CloseSquare:
-			p.tokenizer.Next()
+			token := p.tokenizer.Next()
 			txtSymb := symbols.TextSymbol{
 				Content: "]",
+				Position: token.Pos,
 			}
 			statements = append(statements, txtSymb)
 			continue
@@ -473,8 +534,9 @@ func (p *Parser) inlineMath() (symbols.Symbol, error) {
 	var symbol symbols.Symbol
 	var statements []symbols.Symbol
 
-	if p.tokenizer.Next().Type != tokenizer.Dollar {
-		return symbol, errors.New("unexpected token %s, $ expected")
+	firstToken := p.tokenizer.Next()
+	if firstToken.Type != tokenizer.Dollar {
+		return symbol, errors.New("unexpected firstToken %s, $ expected")
 	}
 
 	// Body
@@ -499,20 +561,23 @@ func (p *Parser) inlineMath() (symbols.Symbol, error) {
 			token := p.tokenizer.Next()
 			txtSymb := symbols.TextSymbol{
 				Content: token.Value.(string),
+				Position: token.Pos,
 			}
 			statements = append(statements, txtSymb)
 			continue
 		case tokenizer.OpenSquare:
-			p.tokenizer.Next()
+			token := p.tokenizer.Next()
 			txtSymb := symbols.TextSymbol{
 				Content: "[",
+				Position: token.Pos,
 			}
 			statements = append(statements, txtSymb)
 			continue
 		case tokenizer.CloseSquare:
-			p.tokenizer.Next()
+			token := p.tokenizer.Next()
 			txtSymb := symbols.TextSymbol{
 				Content: "]",
+				Position: token.Pos,
 			}
 			statements = append(statements, txtSymb)
 			continue
@@ -525,5 +590,82 @@ func (p *Parser) inlineMath() (symbols.Symbol, error) {
 		}
 	}
 
-	return symbols.InlineMathSymbol{Statements: statements}, nil
+	return symbols.InlineMathSymbol{
+		Statements: statements,
+		Position: firstToken.Pos,
+	}, nil
+}
+
+func (p *Parser) macroText(startsWith tokenizer.TokenType, endsWith tokenizer.TokenType) (symbols.Symbol, error){
+	// A text that will later on be parsed by the Macro Executor.
+	// A Macro Text can contain anything.
+
+	var symbol symbols.Symbol
+	firstToken := p.tokenizer.Peek()
+	if firstToken.Type != startsWith {
+		return symbol, fmt.Errorf("unexpected token %v, %v was expected at %v",
+			firstToken.Type,
+			startsWith,
+			firstToken.Pos,
+		)
+	}
+	p.tokenizer.Next()
+
+	var tokens []tokenizer.Token
+
+	// Macro Text
+	shouldStop := false
+	seenStartTokens := 0
+	for ;; {
+		t := p.tokenizer.Peek()
+
+		switch t.Type {
+		case endsWith:
+			tokens = append(tokens, t)
+			if seenStartTokens == 0 {
+				p.tokenizer.Next()
+				shouldStop = true
+			} else {
+				seenStartTokens--
+				p.tokenizer.Next()
+				tokens = append(tokens, t)
+			}
+		case tokenizer.Percent:
+			// Skip comments
+			for ;; {
+				t := p.tokenizer.Next()
+				if t.Type == tokenizer.Text {
+					if strings.Contains(t.Value.(string), "\n") {
+						break
+					}
+				}
+			}
+		case startsWith:
+			p.tokenizer.Next()
+			seenStartTokens++
+		default:
+			p.tokenizer.Next()
+			tokens = append(tokens, t)
+		}
+
+		if shouldStop {
+			break
+		}
+	}
+
+	return symbols.MacroTextSymbol{
+		Tokens: tokens,
+		Position: firstToken.Pos,
+	}, nil
+}
+
+func (p *Parser) skiptext() {
+	for ;; {
+		peek := p.tokenizer.Peek()
+		if peek.Type == tokenizer.Text {
+			p.tokenizer.Next()
+			continue
+		}
+		break
+	}
 }

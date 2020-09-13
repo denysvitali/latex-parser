@@ -1,5 +1,7 @@
 package symbols
 
+import "text/scanner"
+
 /*
 	A symbol that represents an environment
  */
@@ -10,6 +12,11 @@ type EnvSymbol struct {
 	Environment string
 	Statements []Symbol
 	SquareArgs []Symbol
+	Position scanner.Position
+}
+
+func (e EnvSymbol) Pos() scanner.Position {
+	return e.Position
 }
 
 func (e EnvSymbol) Type() SymbolType {
