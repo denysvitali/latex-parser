@@ -100,6 +100,11 @@ func (p *Parser) parse(tokenType tokenizer.TokenType, envName string) ([]symbols
 				return statements, err
 			}
 
+			next := p.tokenizer.Next()
+			if next.Type != tokenizer.CloseCurly {
+				return statements, fmt.Errorf("invalid token: } expected but %v found", next)
+			}
+
 			statements = append(statements, symbols.CurlyEnvSymbol {
 				Statements: parsedStatements,
 			})
@@ -107,11 +112,15 @@ func (p *Parser) parse(tokenType tokenizer.TokenType, envName string) ([]symbols
 		}
 
 		if currentToken.Type == tokenizer.CloseCurly {
-			return statements, nil
+			if tokenType == tokenizer.CloseCurly {
+				return statements, nil
+			}
 		}
 
 		if currentToken.Type == tokenizer.CloseSquare {
-			return statements, nil
+			if tokenType == tokenizer.CloseSquare {
+				return statements, nil
+			}
 		}
 
 		panic(fmt.Sprintf("unimplemented token %s", currentToken.Type))
